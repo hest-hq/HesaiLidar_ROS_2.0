@@ -1,0 +1,159 @@
+---
+# Configure a wired interface to talk to a Hesai LiDAR (factory IP 192.168.1.201).
+# Creates a dedicated NetworkManager profile that:
+#   - assigns the laptop a static IP on the LiDAR subnet
+#   - never becomes the default route (Wi-Fi keeps working)
+#   - is autoconnect=no so it ONLY activates when you ask — the same NIC
+#     keeps doing DHCP for normal internet use otherwise
+#   - opens UDP 2368 on firewalld for the chosen interface
+#
+# Usage (from the repo root, on the laptop):
+#   ansible-playbook ansible/setup-lidar-network.yml --ask-become-pass
+#
+# The play activates the profile once at the end to verify the LiDAR is
+# reachable. After that, switch between LiDAR and normal internet with:
+#
+#   sudo nmcli connection up   hesai-lidar     # LiDAR mode
+#   sudo nmcli connection down hesai-lidar     # back to DHCP
+#
+# Override the interface or IPs:
+#   ansible-playbook ansible/setup-lidar-network.yml \
+#       -e lidar_iface=enp4s0 -e host_ip=192.168.1.50 --ask-become-pass
+#
+# To tear it down later:
+#   sudo nmcli connection delete hesai-lidar
+#   sudo firewall-cmd --permanent --remove-port=2368/udp && sudo firewall-cmd --reload
+
+- name: Configure wired NIC for Hesai LiDAR
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    profile_name: hesai-lidar
+    host_ip: 192.168.1.100
+    subnet_prefix: 24
+    lidar_ip: 192.168.1.201
+    lidar_udp_port: 2368
+    # Auto-detect first non-loopback ethernet if not overridden.
+    lidar_iface: "{{ ansible_facts.interfaces
+                     | reject('match', '^(lo|wl|virbr|docker|veth|cni|tun|tap)')
+                     | map('regex_search', '^en.*')
+                     | select('string') | list | first | default('') }}"
+
+  pre_tasks:
+    - name: Verify nmcli is available
+      ansible.builtin.command: nmcli --version
+      changed_when: false
+
+    - name: Show detected interface
+      ansible.builtin.debug:
+        msg: "Using ethernet interface: {{ lidar_iface }}"
+
+    - name: Fail if no ethernet interface found
+      ansible.builtin.fail:
+        msg: >
+          No ethernet interface detected. Pass one explicitly:
+          -e lidar_iface=<name>   (see `nmcli device status`)
+      when: lidar_iface | length == 0
+
+    - name: Confirm the interface actually exists
+      ansible.builtin.command: "nmcli -t -f DEVICE device status"
+      register: nm_devices
+      changed_when: false
+
+    - name: Fail if NetworkManager doesn't see the interface
+      ansible.builtin.fail:
+        msg: "Interface '{{ lidar_iface }}' not visible to NetworkManager."
+      when: lidar_iface not in nm_devices.stdout_lines
+
+  tasks:
+    - name: Look up existing connection (if any)
+      ansible.builtin.command: "nmcli -t -f NAME connection show"
+      register: nm_connections
+      changed_when: false
+
+    - name: Create the LiDAR NM profile
+      become: true
+      ansible.builtin.command: >
+        nmcli connection add
+        type ethernet
+        ifname {{ lidar_iface }}
+        con-name {{ profile_name }}
+        connection.autoconnect no
+        ipv4.method manual
+        ipv4.addresses {{ host_ip }}/{{ subnet_prefix }}
+        ipv4.never-default yes
+        ipv6.method disabled
+      when: profile_name not in nm_connections.stdout_lines
+
+    - name: Ensure profile settings are correct (idempotent update)
+      become: true
+      ansible.builtin.command: >
+        nmcli connection modify {{ profile_name }}
+        connection.interface-name {{ lidar_iface }}
+        connection.autoconnect no
+        ipv4.method manual
+        ipv4.addresses {{ host_ip }}/{{ subnet_prefix }}
+        ipv4.never-default yes
+        ipv6.method disabled
+      changed_when: false  # nmcli modify is silent on no-change; treat as idempotent
+
+    - name: Bring the LiDAR profile up
+      become: true
+      ansible.builtin.command: "nmcli connection up {{ profile_name }}"
+      register: nm_up
+      changed_when: "'successfully activated' in nm_up.stdout"
+
+    - name: Wait briefly for link to settle
+      ansible.builtin.pause:
+        seconds: 2
+
+    - name: Check if firewalld is running
+      ansible.builtin.command: systemctl is-active firewalld
+      register: firewalld_state
+      changed_when: false
+      failed_when: false
+
+    - name: Open UDP {{ lidar_udp_port }} on firewalld (if running)
+      become: true
+      ansible.posix.firewalld:
+        port: "{{ lidar_udp_port }}/udp"
+        permanent: true
+        immediate: true
+        state: enabled
+      when: firewalld_state.stdout == "active"
+
+    - name: Ping the LiDAR
+      ansible.builtin.command: "ping -c 3 -W 2 {{ lidar_ip }}"
+      register: ping_result
+      changed_when: false
+      failed_when: false
+
+    - name: Report ping result
+      ansible.builtin.debug:
+        msg: >
+          {{ 'LiDAR is reachable at ' ~ lidar_ip
+             if ping_result.rc == 0
+             else 'WARNING: ' ~ lidar_ip ~ ' did not reply. Check cable/power and confirm
+                   the LiDAR still has its factory IP. Web UI: http://' ~ lidar_ip }}
+
+    - name: Verify UDP traffic from the LiDAR (5s sample)
+      become: true
+      ansible.builtin.shell: >
+        timeout 5 tcpdump -i {{ lidar_iface }} -nn -c 5 udp port {{ lidar_udp_port }}
+        2>&1 || true
+      register: tcpdump_out
+      changed_when: false
+
+    - name: Show captured packets
+      ansible.builtin.debug:
+        var: tcpdump_out.stdout_lines
+
+    - name: Reminder
+      ansible.builtin.debug:
+        msg:
+          - "Profile '{{ profile_name }}' is configured with autoconnect=no."
+          - "Switch modes any time with:"
+          - "  sudo nmcli connection up   {{ profile_name }}   # LiDAR"
+          - "  sudo nmcli connection down {{ profile_name }}   # back to DHCP"
