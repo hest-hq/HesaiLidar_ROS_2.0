@@ -1,0 +1,16 @@
+# colcon build outputs
+build/
+install/
+log/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Captures / bags
+*.bag
+*.pcap
+
+# OS junk
+.DS_Store
