@@ -37,6 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libboost-all-dev \
       libyaml-cpp-dev \
       ros-${ROS_DISTRO}-rviz2 \
+      tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /ros2_ws/src/hesai_ros_driver
@@ -69,7 +70,7 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
 COPY ros_entrypoint.sh /ros_entrypoint.sh
 RUN chmod +x /ros_entrypoint.sh
 
-ENTRYPOINT ["/ros_entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/ros_entrypoint.sh"]
 
 # Default: full launch (driver node + rviz2)
 CMD ["ros2", "launch", "hesai_ros_driver", "start.py"]
