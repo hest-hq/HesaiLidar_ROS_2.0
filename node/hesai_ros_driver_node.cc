@@ -51,6 +51,7 @@ static void sigHandler(int sig)
 #ifdef ROS_FOUND
   ros::shutdown();
 #elif ROS2_FOUND
+  rclcpp::shutdown();
   g_cv.notify_all();
 #endif
 }
