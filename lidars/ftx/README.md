@@ -20,7 +20,7 @@ The FTX is solid-state, so several config knobs that matter for spinning lidars 
 | `frame_start_azimuth`        | Ignored. FTX frames split on Frame ID change, not azimuth.                 |
 | `firetimes_path`             | Not used (parser feature: ❌). Leave empty; no FATAL on missing file.      |
 | `distance_correction_flag`   | Not supported (parser feature: ❌). Leave `false`.                         |
-| `send_imu_ros`               | FTX has no IMU — `false`.                                                  |
+| `send_imu_ros`               | FTX has an on-board IMU; `Udp7_3Parser` decodes the interleaved 34-byte IMU UDP packet. Set `true` to publish on `/lidar_imu`. |
 | `xt_spot_correction`         | XT-S only — leave `false`.                                                 |
 
 Frame rate is set on the device itself (Web Control or firmware), not pushed by the driver. Adjust `default_frame_frequency` to match what the device is actually running.
@@ -32,7 +32,7 @@ Wiring, host networking, and the colcon build are identical to the XT32M (the FT
 ```bash
 source ~/hesai_ws/install/setup.bash
 ros2 run hesai_ros_driver hesai_ros_driver_node \
-    --ros-args -p config_path:=$HOME/hesai_ws/src/HesaiLidar_ROS_2.0/ftx/config_ftx.yaml
+    --ros-args -p config_path:=$HOME/hesai_ws/src/HesaiLidar_ROS_2.0/lidars/ftx/config_ftx.yaml
 ```
 
 If you're swapping between an XT32M and an FTX on the same physical cable (both default to 192.168.1.201), only one can be plugged in at a time unless you reconfigure the lidar IPs via Web Control.

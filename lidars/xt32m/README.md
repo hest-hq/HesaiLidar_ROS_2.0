@@ -95,7 +95,7 @@ With the lidar powered, the host on `192.168.1.0/24`, and `ping 192.168.1.201` w
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 run hesai_ros_driver hesai_ros_driver_node \
-    --ros-args -p config_path:=$HOME/ros2_ws/src/HesaiLidar_ROS_2.0/xt32m/config_xt32m.yaml
+    --ros-args -p config_path:=$HOME/ros2_ws/src/HesaiLidar_ROS_2.0/lidars/xt32m/config_xt32m.yaml
 ```
 
 The `config_path` parameter is read at startup (see `node/hesai_ros_driver_node.cc`); when set, it overrides the package's default `config/config.yaml`. The path must be absolute.
@@ -119,12 +119,12 @@ ros2 topic echo /hesai_ros_driver/lidar_points --once | head
 
 ## 5. Tweak the config
 
-`xt32m/config_xt32m.yaml` is the only file you should need to edit. Common changes:
+`lidars/xt32m/config_xt32m.yaml` is the only file you should need to edit. Common changes:
 
 - **Spin rate / frame rate.** Set `speed: 300`, `600`, or `1200` (RPM → 5/10/20 Hz) under `lidar_udp_type` to push it to the lidar at startup, or change it in Web Control. Keep `default_frame_frequency` in step (10.0 = 600 RPM).
 - **Static unicast destination.** If you've changed the lidar's `Destination IP` from broadcast to your host IP via Web Control, no driver change is needed.
 - **Multiple lidars on one host.** Give each one a different `udp_port` (and `device_udp_src_port` if they share a destination IP). See the multi-lidar section in the root `README.md`.
-- **Offline correction file.** If the host's PTC port is blocked or you want deterministic startup, set `correction_file_path` to the absolute path of `xt32m/XT32M2X_Angle_Correction_File-1.csv` and `firetimes_path` to the firetime CSV.
+- **Offline correction file.** If the host's PTC port is blocked or you want deterministic startup, set `correction_file_path` to the absolute path of `lidars/xt32m/XT32M2X_Angle_Correction_File-1.csv` and `firetimes_path` to the firetime CSV.
 - **TF transform.** Set `transform_flag: true` and fill in `x/y/z/roll/pitch/yaw` to publish points in your robot frame instead of `hesai_lidar`.
 
 ## Troubleshooting

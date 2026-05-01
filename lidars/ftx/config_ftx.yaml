@@ -1,0 +1,171 @@
+# =============================================================================
+# Hesai FTX (PandarFT2 / FT2) — solid-state lidar driver config
+# =============================================================================
+# Factory defaults:
+#   Source IPv4 address:     192.168.1.201
+#   Subnet mask:             255.255.255.0
+#   Default destination:     255.255.255.255 (broadcast)
+#   Point cloud UDP port:    2368
+#   PTC port:                9347
+#
+# Set the host computer to 192.168.1.X (X in 2..200 or 202..254), mask /24.
+# Many FT-series units have NO HTTP Web Control — configuration is over PTC only.
+#
+# How FTX differs from a spinning lidar (see SDK docs/parser_features.md):
+#   * Solid-state: no rotor, no spin rate. The `speed` knob is inert.
+#   * Frames split by Frame ID (not azimuth). `frame_start_azimuth` is inert.
+#   * No firetime correction (parser feature: ❌). firetimes_path stays empty.
+#   * No distance correction (parser feature: ❌).
+#   * Frame rate is set on the device side (firmware/PTC), not pushed by the driver.
+#
+# Run:
+#   ros2 run hesai_ros_driver hesai_ros_driver_node \
+#       --ros-args -p config_path:=$(pwd)/src/HesaiLidar_ROS_2.0/lidars/ftx/config_ftx.yaml
+#
+# The YAML supports multiple lidars under `lidar:` (each as a list item). For
+# the multi-lidar pattern see the root README.md.
+# -----------------------------------------------------------------------------
+
+lidar:
+  - driver:
+      # ----- Source selector -------------------------------------------------
+      # source_type controls which of the {lidar_udp_type, pcap_type, rosbag_type,
+      # serial_type} blocks below is actually consumed. The other blocks are read
+      # but ignored.
+      #   1 = real-time lidar (UDP)        — needs lidar_udp_type
+      #   2 = pcap replay                  — needs pcap_type
+      #   3 = rosbag replay (raw packets)  — needs rosbag_type
+      #   4 = serial (RS485/RS232)         — JT-series only, not used for FTX
+      use_gpu: false                                  # GPU parse path requires building the SDK with FIND_CUDA=ON.
+      source_type: 1
+
+      # ----- 1: Real-time UDP source ----------------------------------------
+      lidar_udp_type:
+        device_ip_address: 192.168.1.201              # Lidar's source IPv4 (factory default).
+        udp_port: 2368                                # Destination UDP port the lidar streams to.
+        ptc_port: 9347                                # TCP port for PTC (status + correction fetch).
+        multicast_ip_address: ""                      # Empty = unicast only. Set to a 224.0.0.0–239.255.255.255 group to join multicast (broadcast 255.255.255.255 is NOT valid here).
+
+        use_ptc_connected: true                       # When true, the driver opens a PTC TCP connection at startup and pulls the per-unit angle correction. Look for "Read correction file from lidar success" in the log.
+        host_ptc_port: 0                              # 0 = OS-assigned ephemeral source port. Set non-zero only if a firewall pinholes a specific source port.
+
+        # ----- Correction files -------------------------------------------
+        # FTX correction situation:
+        #
+        #   * Angle correction: per-unit, fetched over PTC at startup. The
+        #     bundled FTX_Angle Correction File.dat in the SDK is only a
+        #     78-byte placeholder — not a real correction. PTC fetch is the
+        #     only realistic source of correction data; if PTC is blocked,
+        #     get the per-unit CSV from Hesai and put its absolute path in
+        #     correction_file_path below.
+        #
+        #   * Firetime correction: NOT used by this model. Leave firetimes_path
+        #     empty. The driver logs only "don't support firetimes file" at
+        #     WARNING level — no FATAL like there is on XT lidars.
+        correction_file_path: ""
+        firetimes_path: ""
+
+        # ----- Connection timeouts ----------------------------------------
+        recv_point_cloud_timeout: -1                  # ms; -1 = block forever (default).
+        ptc_connect_timeout: -1                       # ms; -1 = use SDK default.
+
+        # ----- Host network ----------------------------------------------
+        host_ip_address: ""                           # Empty = derive from the UDP packet source IP.
+        fault_message_port: 0                         # 0 = same UDP port as point cloud (default). Some FTX firmware emits status/fault packets interleaved on 2368 (we observed ~190 Hz of 99-byte packets that are NOT FT V3 IMU); the driver silently ignores them.
+
+        # ----- Lidar control (pushed at startup over PTC) ----------------
+        standby_mode: -1                              # -1 = leave unchanged. 0 = operating, 1 = standby.
+        speed: -1                                     # FTX is solid-state; spin rate doesn't apply. Leave -1.
+        ptc_mode: 0                                   # 0 = plain TCP. 1 = TCP+SSL.
+        certFile: ""                                  # PTCS only.
+        privateKeyFile: ""                            # PTCS only.
+        caFile: ""                                    # PTCS only.
+
+      # ----- 2: PCAP replay source ------------------------------------------
+      # Used when source_type: 2. The driver reads packets from a saved PCAP and
+      # parses them as if they came over the network.
+      pcap_type:
+        pcap_path: ""                                 # Absolute path to the .pcap file.
+        correction_file_path: ""                      # Set explicitly — PCAP has no PTC channel.
+        firetimes_path: ""                            # Unused on FTX.
+        pcap_play_synchronization: true               # true = replay at the original capture rate.
+        pcap_play_in_loop: false                      # true = restart from the beginning at EOF.
+        play_rate_: 1.0                               # Playback speed multiplier.
+
+      # ----- 3: Rosbag replay source ----------------------------------------
+      # Used when source_type: 3. Requires the bag to contain raw packets
+      # recorded with send_packet_ros: true on ros_recv_packet_topic.
+      rosbag_type:
+        correction_file_path: ""
+        firetimes_path: ""                            # Unused on FTX.
+
+      # ----- 4: Serial source -----------------------------------------------
+      # JT-series only. Not relevant for FTX.
+      serial_type:
+        rs485_com: ""
+        rs232_com: ""
+        point_cloud_baudrate: 3125000
+        correction_save_path: ""
+        correction_file_path: ""
+
+      # ----- Public module (applies to all source types) --------------------
+      use_timestamp_type: 0                           # 0 = lidar's own timestamp. 1 = host receive time.
+      frame_start_azimuth: 0                          # Inert for FTX (frames split by Frame ID, not azimuth).
+      thread_num: 4                                   # Parser worker threads.
+
+      # ----- Static TF / point transform -----------------------------------
+      # If transform_flag is true, the driver applies (x, y, z, roll, pitch, yaw)
+      # to every point before publishing — i.e. points come out already in the
+      # robot frame, not the lidar frame. Easier to use a separate
+      # static_transform_publisher for clarity.
+      transform_flag: false
+      x: 0
+      y: 0
+      z: 0
+      roll: 0
+      pitch: 0
+      yaw: 0
+
+      # ----- FOV filtering --------------------------------------------------
+      fov_start: -1                                   # Azimuth window. -1,-1 = full FOV.
+      fov_end:  -1
+      channel_fov_filter_path: ""                     # Optional CSV: per-channel FOV mask.
+      multi_fov_filter_ranges: ""                     # Inline equivalent.
+
+      # ----- Other --------------------------------------------------------
+      enable_packet_loss_tool: true                   # Publishes drop counts on ros_send_packet_loss_topic.
+      distance_correction_flag: false                 # FTX does not support distance correction (parser feature: ❌).
+      xt_spot_correction: false                       # XT-S only. Leave OFF.
+      device_udp_src_port: 0                          # 0 = accept any source port.
+      device_fault_port: 0                            # Same idea for fault messages.
+      frame_frequency: 0                              # 0 = let the lidar drive the rate.
+      default_frame_frequency: 10.0                   # FTX frame rate is set in firmware/PTC; verify against your unit and align this number.
+      echo_mode_filter: 0                             # 0 = accept all return modes.
+
+    ros:
+      ros_frame_id: hesai_lidar                       # Frame ID stamped on every PointCloud2 / Imu / packet message.
+
+      # Topic names. recv vs send: the driver subscribes to ros_recv_packet_topic
+      # in source_type 3 (rosbag), and publishes on the others.
+      ros_recv_packet_topic: /lidar_packets
+      ros_send_packet_topic: /lidar_packets
+      ros_send_point_cloud_topic: /lidar_points
+      ros_send_imu_topic: /lidar_imu
+      ros_send_packet_loss_topic: /lidar_packets_loss
+
+      send_packet_ros: true                           # Republish every received UDP packet for `ros2 bag record /lidar_packets` -> later replay through source_type 3.
+      send_point_cloud_ros: true                      # Publish parsed PointCloud2.
+
+      # ----- IMU disabled (firmware mismatch on this unit) -----------------
+      # The Udp7_3Parser DOES support IMU: it expects a 34-byte UDP packet on
+      # port 2368 with the FT V3 magic header (ee ff 07 03) and a Reserved1
+      # byte set to 1. On the unit we tested, no such packet ever arrives:
+      # tcpdump shows a stream of 99-byte non-FT-V3 packets at ~190 Hz that
+      # carry an incrementing ASCII sequence counter and large 0xff stretches
+      # — those look like fault/status/heartbeat messages, not IMU.
+      #
+      # Until either (a) a firmware version is loaded that emits real FT V3
+      # IMU packets, or (b) we add a custom parser path for the 99-byte
+      # format, leave this false to avoid creating a /lidar_imu topic with
+      # zero traffic.
+      send_imu_ros: false

@@ -1,0 +1,164 @@
+# =============================================================================
+# Hesai XT32M2X (Pandar XTM, 32-channel mechanical) — driver config
+# =============================================================================
+# Factory defaults (User Manual X03):
+#   Source IPv4 address:     192.168.1.201
+#   Subnet mask:             255.255.255.0
+#   Default destination:     255.255.255.255 (broadcast)
+#   Point cloud UDP port:    2368
+#   PTC port:                9347
+#
+# Set the host computer to 192.168.1.X (X in 2..200 or 202..254), mask /24.
+#
+# Run:
+#   ros2 run hesai_ros_driver hesai_ros_driver_node \
+#       --ros-args -p config_path:=$(pwd)/src/HesaiLidar_ROS_2.0/lidars/xt32m/config_xt32m.yaml
+#
+# The YAML supports multiple lidars under `lidar:` (each as a list item with its
+# own driver/ros blocks). For the multi-lidar pattern see the root README.md.
+# -----------------------------------------------------------------------------
+
+lidar:
+  - driver:
+      # ----- Source selector -------------------------------------------------
+      # source_type controls which of the {lidar_udp_type, pcap_type, rosbag_type,
+      # serial_type} blocks below is actually consumed. The other blocks are read
+      # but ignored.
+      #   1 = real-time lidar (UDP)        — needs lidar_udp_type
+      #   2 = pcap replay                  — needs pcap_type
+      #   3 = rosbag replay (raw packets)  — needs rosbag_type, requires
+      #       another node to publish ros_recv_packet_topic from a bag
+      #   4 = serial (RS485/RS232)         — for JT-series lidars only
+      # Leave at 1 for live capture from the XT32M2X over Ethernet.
+      use_gpu: false                                  # GPU parse path requires building the SDK with FIND_CUDA=ON.
+      source_type: 1
+
+      # ----- 1: Real-time UDP source ----------------------------------------
+      lidar_udp_type:
+        device_ip_address: 192.168.1.201              # Lidar's source IPv4 (factory default).
+        udp_port: 2368                                # Destination UDP port the lidar streams to (must match Web Control).
+        ptc_port: 9347                                # TCP port for PTC (status + correction fetch).
+        multicast_ip_address: ""                      # Empty = unicast only. Set to a 224.0.0.0–239.255.255.255 group to join multicast (broadcast 255.255.255.255 is NOT valid here).
+
+        use_ptc_connected: true                       # When true, the driver opens a PTC TCP connection at startup and pulls the per-unit angle correction from the lidar — see "Read correction file from lidar success" in the log.
+        host_ptc_port: 0                              # 0 = OS-assigned ephemeral source port for our side of the PTC connection. Set non-zero only if a firewall pinholes a specific source port.
+
+        # ----- Correction files -------------------------------------------
+        # Two distinct corrections, fetched from different places:
+        #
+        #   * Angle correction (per-unit, baked into each device): pulled over
+        #     PTC at startup when use_ptc_connected: true. The CSV path below
+        #     is only used as a FALLBACK if PTC fetch fails.
+        #
+        #   * Firetime correction (per-MODEL, same for every XT32M2X): the SDK
+        #     does NOT fetch firetime over PTC. firetimes_path must point at
+        #     the bundled CSV using an absolute path on this machine. Without
+        #     it the driver logs a FATAL but keeps running with slightly
+        #     reduced per-point timestamp precision.
+        #
+        # Bundled CSVs in this repo:
+        #   <repo>/lidars/xt32m/XT32M2X_Angle_Correction_File-1.csv   (per-unit; ours, may not match other lidars)
+        #   <repo>/lidars/xt32m/XT32M2X_Firetime_Correction_File.csv  (per-model; safe to share)
+        correction_file_path: ""
+        firetimes_path: ""                            # SET ME: absolute path to lidars/xt32m/XT32M2X_Firetime_Correction_File.csv on this machine. Driver fails to open firetime if blank, but keeps running.
+
+        # ----- Connection timeouts ----------------------------------------
+        recv_point_cloud_timeout: -1                  # ms; -1 = block forever (default). Set to a positive value to bail out of the receive loop if no UDP arrives.
+        ptc_connect_timeout: -1                       # ms; -1 = use SDK default. Time to wait for the PTC TCP handshake.
+
+        # ----- Host network ----------------------------------------------
+        host_ip_address: ""                           # Empty = derive from the UDP packet source IP. Override only if you bind a specific local interface.
+        fault_message_port: 0                         # 0 = same UDP port as point cloud (default). Set non-zero only if the lidar is configured to send fault messages on a separate port.
+
+        # ----- Lidar control (pushed at startup over PTC) ----------------
+        standby_mode: -1                              # -1 = leave unchanged. 0 = operating, 1 = standby.
+        speed: -1                                     # -1 = leave unchanged. XT32M2X supports 300/600/1200 RPM (= 5/10/20 Hz). Mismatch with default_frame_frequency below shows up as wrong-rate output.
+        ptc_mode: 0                                   # 0 = plain TCP. 1 = TCP+SSL, requires the cert/key/ca paths below.
+        certFile: ""                                  # PTCS only.
+        privateKeyFile: ""                            # PTCS only.
+        caFile: ""                                    # PTCS only.
+
+      # ----- 2: PCAP replay source ------------------------------------------
+      # Used when source_type: 2. The driver reads packets from a saved PCAP and
+      # parses them as if they came over the network. Useful for offline tuning.
+      pcap_type:
+        pcap_path: ""                                 # Absolute path to the .pcap file.
+        correction_file_path: ""                      # PCAP has no PTC channel — set both correction files explicitly here.
+        firetimes_path: ""
+        pcap_play_synchronization: true               # true = replay at the original capture rate (use packet timestamps). false = blast as fast as possible.
+        pcap_play_in_loop: false                      # true = restart from the beginning when EOF is hit.
+        play_rate_: 1.0                               # Playback speed multiplier (1.0 = real-time).
+
+      # ----- 3: Rosbag replay source ----------------------------------------
+      # Used when source_type: 3. Another node (e.g. `ros2 bag play`) republishes
+      # the recorded raw packets on ros_recv_packet_topic; this driver subscribes
+      # and parses them. Requires that the bag was recorded with send_packet_ros: true.
+      rosbag_type:
+        correction_file_path: ""                      # Same logic as pcap_type — set both explicitly.
+        firetimes_path: ""
+
+      # ----- 4: Serial source -----------------------------------------------
+      # JT-series only (e.g. JT16 over RS485/RS232). Not relevant for XT32M2X.
+      serial_type:
+        rs485_com: ""
+        rs232_com: ""
+        point_cloud_baudrate: 3125000
+        correction_save_path: ""
+        correction_file_path: ""
+
+      # ----- Public module (applies to all source types) --------------------
+      use_timestamp_type: 0                           # 0 = lidar's own timestamp on each point. 1 = host receive time. 0 is correct unless the lidar clock is unsynced and you want host wallclock.
+      frame_start_azimuth: 0                          # Pandar128-only knob. Range 1..359 to slice frames at a specific azimuth. <0 disables. Has no effect on XT32M2X.
+      thread_num: 4                                   # Parser worker threads. Plenty for the XT32M2X's ~1.9M pts/sec; raise on bigger lidars.
+
+      # ----- Static TF / point transform -----------------------------------
+      # If transform_flag is true, the driver applies the (x, y, z, roll, pitch, yaw)
+      # transform to every point before publishing — i.e. points come out already in
+      # the robot frame, not the lidar frame. Easier to use a separate
+      # static_transform_publisher for clarity.
+      transform_flag: false
+      x: 0
+      y: 0
+      z: 0
+      roll: 0
+      pitch: 0
+      yaw: 0
+
+      # ----- FOV filtering --------------------------------------------------
+      fov_start: -1                                   # Azimuth window start (1..359). -1,-1 = full 360°.
+      fov_end:  -1                                    # Azimuth window end.
+      channel_fov_filter_path: ""                     # Optional CSV: per-channel FOV mask.
+      multi_fov_filter_ranges: ""                     # Inline equivalent of the CSV, e.g. "[20,30];[40,200]".
+
+      # ----- Other --------------------------------------------------------
+      enable_packet_loss_tool: true                   # Publishes drop counts on ros_send_packet_loss_topic.
+      distance_correction_flag: false                 # XT32M2X supports it but it's typically unnecessary; flips on optical-centre to geometric-centre correction.
+      xt_spot_correction: false                       # XT-S spot-layering correction. XT32M2X is NOT XT-S — leave OFF.
+      device_udp_src_port: 0                          # 0 = accept any source port. Set non-zero (>=1024) when running multiple lidars and filtering by their source port.
+      device_fault_port: 0                            # Same idea for fault messages.
+      frame_frequency: 0                              # 0 = let the lidar drive the rate. Non-zero pushes a frame rate to the device.
+      default_frame_frequency: 10.0                   # 10.0 Hz = 600 RPM (XT32M2X factory default). Keep aligned with `speed` above if you push a non-default speed.
+      echo_mode_filter: 0                             # 0 = accept all return modes (single, dual, etc.). Filter to a specific echo if needed.
+
+    ros:
+      # Frame ID stamped on every PointCloud2 / Imu / packet message. Set this
+      # to your robot's lidar frame so RViz / TF2 can place the cloud correctly.
+      ros_frame_id: hesai_lidar
+
+      # Topic names. recv vs send: the driver subscribes to ros_recv_packet_topic
+      # in source_type 3 (rosbag), and publishes on the others.
+      ros_recv_packet_topic: /lidar_packets
+      ros_send_packet_topic: /lidar_packets
+      ros_send_point_cloud_topic: /lidar_points
+      ros_send_imu_topic: /lidar_imu
+      ros_send_packet_loss_topic: /lidar_packets_loss
+
+      send_packet_ros: true                           # Republish every received UDP packet as a HesaiPacket message. Useful for `ros2 bag record /lidar_packets` -> later replay through source_type 3.
+      send_point_cloud_ros: true                      # Publish parsed PointCloud2.
+
+      # ----- IMU disabled (intentional) ------------------------------------
+      # The XT32M2X uses Udp6_1Parser, which does NOT decode IMU bytes from the
+      # UDP stream — even if the device emits IMU data, this SDK version's XT
+      # parser ignores it. Setting this true would create a /lidar_imu topic
+      # with zero traffic. Leave false until/unless the SDK adds an XT IMU path.
+      send_imu_ros: false

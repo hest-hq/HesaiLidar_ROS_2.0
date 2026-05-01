@@ -1,0 +1,167 @@
+# =============================================================================
+# Hesai JT128 — driver config (128-channel mechanical spinning lidar)
+# =============================================================================
+# Hesai factory defaults (128-channel JT-series typically ship with):
+#   Source IPv4 address:     192.168.1.201
+#   Subnet mask:             255.255.255.0
+#   Default destination:     255.255.255.255 (broadcast)
+#   Point cloud UDP port:    2368
+#   PTC port:                9347
+#
+# Verify against your unit's User Manual (lidars/jt128/JT128_User_Manual_J01-en-260330.pdf).
+# Set the host computer to 192.168.1.X (X in 2..200 or 202..254), mask /24.
+#
+# Run:
+#   ros2 run hesai_ros_driver hesai_ros_driver_node \
+#       --ros-args -p config_path:=$(pwd)/src/HesaiLidar_ROS_2.0/lidars/jt128/config_jt128.yaml
+#
+# JT128 specifics (see SDK docs/parser_features.md):
+#   * Parser:                 Udp1_4Parser (also used by Pandar128/OT128)
+#   * Frame mode:             Azimuth-based (spinning lidar)
+#   * Max points / frame:     1.6M (4000 packets, 400 pts/packet)
+#   * Correction:             ✅ — fetched over PTC
+#   * Firetime:               ✅ — but NOT fetched over PTC for JT128 (only ATX
+#                                 and QT128 fetch firetime via PTC). Path below
+#                                 must be set to an absolute path on this machine.
+#   * Distance correction:    ✅ — optional optical-centre to geometric-centre fix
+#   * IMU:                    Udp1_4Parser populates IMU values from the packet
+#                             stream — flip send_imu_ros below to publish them.
+# -----------------------------------------------------------------------------
+
+lidar:
+  - driver:
+      # ----- Source selector -------------------------------------------------
+      # source_type controls which of the {lidar_udp_type, pcap_type, rosbag_type,
+      # serial_type} blocks below is actually consumed. The other blocks are read
+      # but ignored.
+      #   1 = real-time lidar (UDP)        — needs lidar_udp_type
+      #   2 = pcap replay                  — needs pcap_type
+      #   3 = rosbag replay (raw packets)  — needs rosbag_type
+      #   4 = serial (RS485/RS232)         — JT16 only, not used for JT128
+      use_gpu: false                                  # GPU parse path requires building the SDK with FIND_CUDA=ON.
+      source_type: 1
+
+      # ----- 1: Real-time UDP source ----------------------------------------
+      lidar_udp_type:
+        device_ip_address: 192.168.1.201              # Lidar's source IPv4 (factory default).
+        udp_port: 2368                                # Destination UDP port the lidar streams to.
+        ptc_port: 9347                                # TCP port for PTC (status + correction fetch).
+        multicast_ip_address: ""                      # Empty = unicast only. Set to a 224.0.0.0–239.255.255.255 group to join multicast (broadcast 255.255.255.255 is NOT valid here).
+
+        use_ptc_connected: true                       # When true, the driver opens a PTC TCP connection at startup and pulls the per-unit angle correction. Look for "Read correction file from lidar success" in the log.
+        host_ptc_port: 0                              # 0 = OS-assigned ephemeral source port.
+
+        # ----- Correction files -------------------------------------------
+        # JT128 has TWO corrections, fetched from different places:
+        #
+        #   * Angle correction (per-unit): pulled over PTC at startup. The
+        #     CSV at lidars/jt128/JT128_default_angle.csv is a per-MODEL template
+        #     and only used as a fallback if PTC fails. Set
+        #     correction_file_path to its absolute path if you want offline
+        #     determinism; leave empty to rely on PTC.
+        #
+        #   * Firetime correction (per-MODEL): the SDK does NOT fetch
+        #     firetime over PTC for JT128. firetimes_path must be set to an
+        #     absolute path on this machine, otherwise the driver throws
+        #     "Open firetime file failed" at FATAL level (it keeps running
+        #     but with reduced per-point timestamp precision). The CSV
+        #     bundled here was copied from the SDK and is correct for any
+        #     JT128.
+        correction_file_path: ""
+        firetimes_path: ""                            # SET ME: absolute path to lidars/jt128/JT128_Firetime_Correction_File.csv on this machine.
+
+        # ----- Connection timeouts ----------------------------------------
+        recv_point_cloud_timeout: -1                  # ms; -1 = block forever (default).
+        ptc_connect_timeout: -1                       # ms; -1 = use SDK default.
+
+        # ----- Host network ----------------------------------------------
+        host_ip_address: ""                           # Empty = derive from the UDP packet source IP.
+        fault_message_port: 0                         # 0 = same UDP port as point cloud (default).
+
+        # ----- Lidar control (pushed at startup over PTC) ----------------
+        standby_mode: -1                              # -1 = leave unchanged. 0 = operating, 1 = standby.
+        speed: -1                                     # -1 = leave unchanged. JT128 spin rate is set in firmware/PTC; verify on your unit. Push e.g. 600 (= 10 Hz) only if you've checked that's a supported rate.
+        ptc_mode: 0                                   # 0 = plain TCP. 1 = TCP+SSL.
+        certFile: ""                                  # PTCS only.
+        privateKeyFile: ""                            # PTCS only.
+        caFile: ""                                    # PTCS only.
+
+      # ----- 2: PCAP replay source ------------------------------------------
+      pcap_type:
+        pcap_path: ""                                 # Absolute path to the .pcap file.
+        correction_file_path: ""                      # PCAP has no PTC channel — set both correction files explicitly here.
+        firetimes_path: ""
+        pcap_play_synchronization: true               # true = replay at the original capture rate.
+        pcap_play_in_loop: false                      # true = restart from the beginning at EOF.
+        play_rate_: 1.0                               # Playback speed multiplier.
+
+      # ----- 3: Rosbag replay source ----------------------------------------
+      rosbag_type:
+        correction_file_path: ""                      # Same logic as pcap_type — set both explicitly.
+        firetimes_path: ""
+
+      # ----- 4: Serial source -----------------------------------------------
+      # JT16 only (RS485/RS232). Not relevant for JT128.
+      serial_type:
+        rs485_com: ""
+        rs232_com: ""
+        point_cloud_baudrate: 3125000
+        correction_save_path: ""
+        correction_file_path: ""
+
+      # ----- Public module (applies to all source types) --------------------
+      use_timestamp_type: 0                           # 0 = lidar's own timestamp on each point. 1 = host receive time.
+      frame_start_azimuth: 0                          # Pandar128-style knob. Range 1..359 to slice frames at a specific azimuth. <0 disables.
+      thread_num: 4                                   # Parser worker threads. Bump on JT128 if CPU-bound (1.6M pts/frame is heavier than XT32M2X).
+
+      # ----- Static TF / point transform -----------------------------------
+      # If transform_flag is true, the driver applies (x, y, z, roll, pitch, yaw)
+      # to every point before publishing — i.e. points come out already in the
+      # robot frame, not the lidar frame. Easier to use a separate
+      # static_transform_publisher for clarity.
+      transform_flag: false
+      x: 0
+      y: 0
+      z: 0
+      roll: 0
+      pitch: 0
+      yaw: 0
+
+      # ----- FOV filtering --------------------------------------------------
+      fov_start: -1                                   # Azimuth window. -1,-1 = full 360°.
+      fov_end:  -1
+      channel_fov_filter_path: ""                     # Optional CSV: per-channel FOV mask.
+      multi_fov_filter_ranges: ""                     # Inline equivalent.
+
+      # ----- Other --------------------------------------------------------
+      enable_packet_loss_tool: true                   # Publishes drop counts on ros_send_packet_loss_topic.
+      distance_correction_flag: false                 # JT128 supports it (parser feature: ✅). Flip to true to apply optical-centre to geometric-centre fix.
+      xt_spot_correction: false                       # XT-S only. Leave OFF.
+      device_udp_src_port: 0                          # 0 = accept any source port.
+      device_fault_port: 0                            # Same idea for fault messages.
+      frame_frequency: 0                              # 0 = let the lidar drive the rate.
+      default_frame_frequency: 10.0                   # Verify against your unit's actual rate (visible in driver "raw frame:" stdout).
+      echo_mode_filter: 0                             # 0 = accept all return modes.
+
+    ros:
+      ros_frame_id: hesai_lidar                       # Frame ID stamped on every PointCloud2 / Imu / packet message.
+
+      # Topic names. recv vs send: the driver subscribes to ros_recv_packet_topic
+      # in source_type 3 (rosbag), and publishes on the others.
+      ros_recv_packet_topic: /lidar_packets
+      ros_send_packet_topic: /lidar_packets
+      ros_send_point_cloud_topic: /lidar_points
+      ros_send_imu_topic: /lidar_imu
+      ros_send_packet_loss_topic: /lidar_packets_loss
+
+      send_packet_ros: true                           # Republish every received UDP packet for `ros2 bag record /lidar_packets` -> later replay through source_type 3.
+      send_point_cloud_ros: true                      # Publish parsed PointCloud2.
+
+      # ----- IMU --------------------------------------------------------
+      # JT128 uses Udp1_4Parser, which DOES populate IMU from the UDP stream
+      # (verified in the SDK: 9 imu_config writes in udp1_4_parser.h). Setting
+      # this true should produce a /lidar_imu topic with non-zero traffic.
+      # Verify on your unit with `ros2 topic hz /lidar_imu` after bring-up; if
+      # the topic is silent, your firmware may not be emitting IMU bytes —
+      # fall back to false until verified.
+      send_imu_ros: true
