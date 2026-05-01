@@ -17,14 +17,16 @@ lidar:
         device_ip_address: 192.168.1.201            # XT32M2X factory default
         udp_port: 2368                              # Point cloud UDP destination port
         ptc_port: 9347                              # PTC TCP port (status + correction fetch)
-        multicast_ip_address: 255.255.255.255       # Default destination is broadcast
+        multicast_ip_address: ""                    # Empty = unicast only. Set to 224.0.0.0–239.255.255.255 to join a multicast group.
 
         use_ptc_connected: true                     # PTC pulls the angle correction from the lidar at startup.
         host_ptc_port: 0                            # 0 = OS-assigned ephemeral source port
 
-        # Bundled fallback files. Used only if PTC fetch is unavailable.
-        # Set to an absolute path on your machine, e.g.
-        #   /home/<user>/ros2_ws/src/HesaiLidar_ROS_2.0/xt32m/XT32M2X_Angle_Correction_File-1.csv
+        # Angle correction is fetched over PTC at startup; correction_file_path is only the fallback if PTC fails.
+        # Firetime is NOT fetched over PTC — firetimes_path must always be set to an absolute path on your machine.
+        # The bundled files live alongside this config:
+        #   <repo>/xt32m/XT32M2X_Angle_Correction_File-1.csv
+        #   <repo>/xt32m/XT32M2X_Firetime_Correction_File.csv
         correction_file_path: ""
         firetimes_path: ""
 
