@@ -1,0 +1,99 @@
+# FTX (PandarFT2) configuration. Hesai factory defaults:
+#   - Source IPv4 address:     192.168.1.201
+#   - Subnet mask:             255.255.255.0
+#   - Default destination:     255.255.255.255 (broadcast)
+#   - Point cloud UDP port:    2368
+#   - PTC port:                9347
+# Set the host computer to 192.168.1.X (X in 2..200 or 202..254) with mask 255.255.255.0.
+#
+# FTX is a solid-state lidar — no spinning mirror, no IMU, no firetime correction.
+# Frames are split by Frame ID rather than azimuth (see SDK docs/parser_features.md).
+#
+# Usage:
+#   ros2 run hesai_ros_driver hesai_ros_driver_node \
+#       --ros-args -p config_path:=$(pwd)/src/HesaiLidar_ROS_2.0/ftx/config_ftx.yaml
+lidar:
+  - driver:
+      use_gpu: false
+      source_type: 1                                # 1 = real-time lidar over UDP
+      lidar_udp_type:
+        device_ip_address: 192.168.1.201            # FTX factory default
+        udp_port: 2368                              # Point cloud UDP destination port
+        ptc_port: 9347                              # PTC TCP port (status + correction fetch)
+        multicast_ip_address: ""                    # Empty = unicast only. Set to 224.0.0.0–239.255.255.255 to join a multicast group.
+
+        use_ptc_connected: true                     # PTC pulls the per-unit angle correction from the lidar at startup.
+        host_ptc_port: 0                            # 0 = OS-assigned ephemeral source port
+
+        # FTX has no firetime correction (parser_features.md ❌). Leave firetimes_path empty.
+        # The bundled FTX_Angle Correction File.dat in the SDK is a 78-byte placeholder,
+        # not a real correction — rely on PTC fetch, or supply the per-unit CSV from Hesai.
+        correction_file_path: ""
+        firetimes_path: ""
+
+        recv_point_cloud_timeout: -1
+        ptc_connect_timeout: -1
+
+        host_ip_address: ""                         # Empty -> derived from the UDP source IP
+        fault_message_port: 0
+
+        standby_mode: -1                            # -1 = leave unchanged
+        speed: -1                                   # FTX is solid-state; spin rate doesn't apply, leave -1.
+        ptc_mode: 0                                 # 0 = plain TCP
+        certFile: ""
+        privateKeyFile: ""
+        caFile: ""
+
+      pcap_type:
+        pcap_path: ""
+        correction_file_path: ""
+        firetimes_path: ""
+        pcap_play_synchronization: true
+        pcap_play_in_loop: false
+        play_rate_: 1.0
+
+      rosbag_type:
+        correction_file_path: ""
+        firetimes_path: ""
+
+      serial_type:
+        rs485_com: ""
+        rs232_com: ""
+        point_cloud_baudrate: 3125000
+        correction_save_path: ""
+        correction_file_path: ""
+
+      # public module
+      use_timestamp_type: 0
+      frame_start_azimuth: 0                        # Ignored for FTX (frames by Frame ID, not azimuth).
+      thread_num: 4
+      transform_flag: false
+      x: 0
+      y: 0
+      z: 0
+      roll: 0
+      pitch: 0
+      yaw: 0
+      fov_start: -1
+      fov_end:  -1
+      channel_fov_filter_path: ""
+      multi_fov_filter_ranges: ""
+      enable_packet_loss_tool: true
+      distance_correction_flag: false               # FTX does not support distance correction (parser_features.md ❌).
+      xt_spot_correction: false                     # XT-S only, leave OFF.
+      device_udp_src_port: 0
+      device_fault_port: 0
+      frame_frequency: 0
+      default_frame_frequency: 10.0                 # FTX frame rate is set in Web Control / firmware; verify and align this value.
+      echo_mode_filter: 0
+
+    ros:
+      ros_frame_id: hesai_lidar
+      ros_recv_packet_topic: /lidar_packets
+      ros_send_packet_topic: /lidar_packets
+      ros_send_point_cloud_topic: /lidar_points
+      ros_send_imu_topic: /lidar_imu
+      ros_send_packet_loss_topic: /lidar_packets_loss
+      send_packet_ros: false
+      send_point_cloud_ros: true
+      send_imu_ros: false                           # FTX (solid-state) has no built-in IMU.
