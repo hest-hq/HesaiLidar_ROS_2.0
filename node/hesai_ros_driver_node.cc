@@ -64,6 +64,7 @@ int main(int argc, char** argv)
 #elif ROS2_FOUND
   rclcpp::init(argc, argv);
 #endif
+  // Install AFTER rclcpp::init, which otherwise overwrites SIGINT with its own handler.
   signal(SIGINT, sigHandler);  ///< bind ctrl+c signal with the sigHandler function
 
   std::string config_path;
